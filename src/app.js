@@ -79,6 +79,87 @@ app.get("/get-profile/userid=:userid",async(req, res)=>{
     }
 })
 
+app.patch("/editpost/postid=:postid",async(req,res)=>{
+  try{
+    const postid = req.params.postid;  
+    console.log(req.body);
+    Post
+      .findByIdAndUpdate(postid,req.body,{
+        new:true
+      })
+      .then((post) => {
+        // Construct the response object
+        const response = {
+          message: "Post update successfully",
+        };
+        // Send the response back to the client
+        res.status(200).json(response);
+      })  
+      .catch((error) => {
+        console.error("Error saving post:", error);
+        res.status(500).json({ error: "Internal Server Error", error });
+      });
+    }catch(error){
+        res.send(e);
+    }  
+})
+
+app.delete("/deletepost/postid=:postid",async(req,res)=>{
+    try{
+    const postid = req.params.postid;  
+    console.log(req.body);
+    Post
+      .findByIdAndDelete(postid)
+      .then((post) => {
+        // Construct the response object
+        Profile.updateMany(
+          { posts: postid },
+          { $pull: { posts: postid } }
+      ).then(()=>{
+        const response = {
+          message: "Data delete successfully",
+        };
+        // Send the response back to the client
+        res.status(200).json(response);
+      })
+    
+      })
+      .catch((error) => {
+        console.error("Error saving post:", error);
+        res.status(500).json({ error: "Internal Server Error", error });
+      });
+    }catch(error){
+        res.send(e);
+    }
+})
+
+app.patch("/updateprofile/userid=:userid", async(req,res)=>{
+    try{
+    const userid = req.params.userid;
+    // const profileRecord = new Profile(req.body);
+    console.log(req.body);
+    Profile
+      .findByIdAndUpdate(userid,req.body,{
+        new:true
+      })
+      .then((profile) => {
+        // Construct the response object
+        const response = {
+          message: "Data updated successfully",
+          data: profile,
+        };
+        // Send the response back to the client
+        res.status(200).json(response);
+      })
+      .catch((error) => {
+        console.error("Error saving post:", error);
+        res.status(500).json({ error: "Internal Server Error", error });
+      });
+    }catch(e){
+        res.send(e);
+    }
+})
+
 //Post api for store phone number on profile collections
 app.post("/profile", async(req,res)=>{
     try{
@@ -172,7 +253,7 @@ app.post('/validate-otp', (req, res) => {
 
     // Validate OTP
     if (otp === userEnteredOTP) {
-        res.json({ success: true, message: 'OTP validated successfully' });
+        res.status(200).json({ success: true, message: 'OTP validated successfully' });
     } else {
         res.status(400).json({ success: false, message: 'Invalid OTP' });
     }
