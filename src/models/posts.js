@@ -5,6 +5,9 @@ const mongoose = require("mongoose")
 const postSchema = new mongoose.Schema({
     content: String,
     author: { type: mongoose.Schema.Types.ObjectId, ref: 'Profile' }
+},
+{
+    timestamps:Date.now
 })
 
 const Post = new mongoose.model('Post', postSchema);
