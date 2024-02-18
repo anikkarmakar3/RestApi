@@ -10,10 +10,24 @@ const bodyParser = require("body-parser");
 const router = express.Router();
 const twilio = require("twilio");
 const app = express();
-const port = process.env.port || 3000;
+const port = process.env.PORT || 3000;
 const server = require("http").createServer(app);
 const io = require("socket.io")(server);
 let newotp = "";
+const cors = require("cors");
+
+// Enable CORS for all routes
+
+// Enable CORS with specific options
+app.use(
+  cors({
+    origin: "*", // Allow requests from this origin
+    methods: ["GET", "POST"], // Allow only specified HTTP methods
+    allowedHeaders: ["Content-Type", "Authorization"], // Allow only specified headers
+    credentials: true, // Allow credentials (e.g., cookies, authorization headers)
+  })
+);
+app.use(cors());
 
 //SDFYRNCYCTJX8YE1G7HDUSZM  This is the recovery
 // Twilio credentials
@@ -25,8 +39,7 @@ const client = twilio(accountSid, authToken);
 
 app.use(express.json());
 
-//Web Socket integration connection
-
+// Web Socket integration connection
 io.on("connection", (socket) => {
   console.log("New user connected:", socket.id);
 
@@ -34,9 +47,30 @@ io.on("connection", (socket) => {
     socket.join(roomId); // Join specific chat room
   });
 
-  socket.on("sendMessage", (message) => {
+  socket.on("sendMessage", (data) => {
     // Broadcast message to connected users in the room
-    io.to(message.chatRoom).emit("messageReceived", message);
+    // io.to(message.chatRoom).emit("messageReceived", message);
+    const { senderId, recipientId, content } = data;
+    // console.log("dsafdsaf"+data)
+      // console.log(data.content)
+        // Create a new message instance
+        const newMessage = new Message({
+            senderId,
+            recipientId,
+            content
+        });
+
+        newMessage.save().then((message) => {
+          console.log(message);
+          
+        })
+        .catch((error) => {
+          console.error("Error saving post:", error);
+          
+        });
+      
+    console.log("=====>>>>>", data);
+    io.emit("sendMessage", data);
   });
 
   // ... (other events)
@@ -44,6 +78,22 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
   });
+
+  // Handle fetching messages for a user
+  socket.on("fetchMessages", async (recipientId) => {
+    try {
+      const messages = await YourMessageModel.find({ recipientId });
+      socket.emit("messages", messages);
+    } catch (error) {
+      console.error("Error fetching messages:", error);
+      // You can emit an error event or handle the error in another way
+    }
+  });
+});
+
+// Start the server
+server.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
 });
 
 app.post("/chat-rooms", async (req, res) => {
@@ -115,6 +165,7 @@ const storage = multer.diskStorage({
 // Create an instance of Multer for handling file uploads
 const upload = multer({ storage: storage });
 
+//This api is used for upload image of the profile.
 app.post("/upload/userid=:userid", upload.single("photo"), async (req, res) => {
   try {
     const file = req.file;
@@ -153,10 +204,19 @@ app.post("/upload/userid=:userid", upload.single("photo"), async (req, res) => {
   }
 });
 
-app.get("/getuserposts/userid=:userid", async (req, res) => {
+//This api is user for get all post of the profile.
+app.get("/getuserposts/userid=:userid&pagenumber=:pagenumeber&count=:pagesize", async (req, res) => {
   try {
     const userid = req.params.userid;
+    // Pagination parameters
+    const page = req.params.pagenumeber; // Current page number
+    const pageSize = req.params.pagesize; // Number of posts per page
+
+    // Calculate the number of documents to skip
+    const skip = (page - 1) * pageSize;
     Post.find({ author: userid })
+        .skip(skip)
+        .limit(pageSize)
       .then((post) => {
         Post.countDocuments({ author: userid }).then((count) => {
           res.status(200).json({ count: count, data: post });
@@ -171,6 +231,7 @@ app.get("/getuserposts/userid=:userid", async (req, res) => {
   }
 });
 
+//This api is user for send request connections.
 app.post("/requestconnections/userid=:userid", async (req, res) => {
   try {
     const userid = req.params.userid;
@@ -204,6 +265,7 @@ app.post("/requestconnections/userid=:userid", async (req, res) => {
   }
 });
 
+//This api is user for accept request connection on this profile.
 app.post("/acceptconnections/userid=:userid", async (req, res) => {
   try {
     const userid = req.params.userid;
@@ -236,7 +298,7 @@ app.get("/get-profile/userid=:userid", async (req, res) => {
     console.log(userid);
     if (userid.match(/^[0-9a-fA-F]{24}$/)) {
       // Yes, it's a valid ObjectId, proceed with `findById` call.
-      Profile.findById(userid)
+      Profile.findById(userid).populate("connections").populate('posts').populate('requestedConnections')
         .then((profile) => {
           res.status(200).json({ data: profile });
         })
@@ -252,6 +314,7 @@ app.get("/get-profile/userid=:userid", async (req, res) => {
   }
 });
 
+//This api is used for edit particular post.
 app.patch("/editpost/postid=:postid", async (req, res) => {
   try {
     const postid = req.params.postid;
@@ -276,6 +339,7 @@ app.patch("/editpost/postid=:postid", async (req, res) => {
   }
 });
 
+//This api is used for delete particular post on user.
 app.delete("/deletepost/postid=:postid", async (req, res) => {
   try {
     const postid = req.params.postid;
@@ -303,6 +367,7 @@ app.delete("/deletepost/postid=:postid", async (req, res) => {
   }
 });
 
+//This api is user for update profile.
 app.patch("/updateprofile/userid=:userid", async (req, res) => {
   try {
     const userid = req.params.userid;
@@ -353,6 +418,7 @@ app.post("/profile", async (req, res) => {
     res.send(e);
   }
 });
+
 //Post api for store post details
 app.post("/post", async (req, res) => {
   try {
@@ -390,11 +456,11 @@ app.get("/", async (req, res) => {
   res.send("hello this is my first application");
 });
 
-app.listen(port, () => {
-  console.log("connecting is successfully", { port });
-});
+// app.listen(port, () => {
+//   console.log("connecting is successfully", { port });
+// });
 
-// Route handler to send OTP
+//This api is user for send otp to random user.
 app.post("/send-otp", (req, res) => {
   const { phoneNumber } = req.body;
 
@@ -419,16 +485,16 @@ app.post("/send-otp", (req, res) => {
     });
 });
 
-// Route handler to validate OTP
+// This api is user for validation and creation of profile
 app.post("/validate-otp", (req, res) => {
-  const { phoneNumber,userEnteredOTP } = req.body;
+  const { phoneNumber, userEnteredOTP } = req.body;
   console.log(newotp);
   // Validate OTP
   if (newotp == userEnteredOTP) {
-    Profile.findOne({ phonenumber:phoneNumber })
+    Profile.findOne({ phonenumber: phoneNumber })
       .then((existingUser) => {
         if (existingUser) {
-          console.log("hello api call is happening",phoneNumber);
+          console.log("hello api call is happening", phoneNumber);
           // If a user with the phone number already exists, send back the user's ID
           const response = {
             success: false,
@@ -437,7 +503,7 @@ app.post("/validate-otp", (req, res) => {
           };
           res.status(200).json(response);
         } else {
-          const profileRecord = new Profile({phonenumber:phoneNumber});
+          const profileRecord = new Profile({ phonenumber: phoneNumber });
           console.log(req.body);
           profileRecord
             .save()
@@ -472,5 +538,25 @@ app.post("/validate-otp", (req, res) => {
     //   .json({ success: true, message: "OTP validated successfully", authenticateKey: authenticatekey  });
   } else {
     res.status(400).json({ success: false, message: "Invalid OTP" });
+  }
+});
+
+//This api is user for serach
+app.get('/serachposts', async (req, res) => {
+  const { searchText } = req.query;
+
+  try {
+      // Split the search text into individual words
+      const searchWords = searchText.split(' ');
+
+      // Construct an array of regular expressions to match any of the search words
+      const regexArray = searchWords.map(word => new RegExp(word, 'i'));
+
+      // Query the database for posts containing any of the search words in their content
+      const posts = await Post.find({ content: { $in: regexArray } }).populate('author');
+
+      res.json(posts);
+  } catch (err) {
+      res.status(500).json({ message: err.message });
   }
 });
