@@ -204,6 +204,95 @@ app.post("/upload/userid=:userid", upload.single("photo"), async (req, res) => {
   }
 });
 
+app.get("/getuser_acceptconnects/userid=:userid&pagenumber=:pagenumeber&count=:pagesize", async (req, res)=>{
+  try {
+    const userid = req.params.userid;
+    // Pagination parameters
+    const page = req.params.pagenumeber; // Current page number
+    const pageSize = req.params.pagesize; // Number of posts per page
+
+    // Calculate the number of documents to skip
+    const skip = (page - 1) * pageSize;
+    Profile.findById(userid)
+        .populate("connections")
+        .skip(skip)
+        .limit(pageSize)
+      .then((profile) => {
+          const count = profile.connections.length;
+          const pagesize = count > 10 ? parseInt(count / 10) : 1;
+          res.status(200).json({ pagenumber: pagesize, data: profile });
+      })
+      .catch((e) => {
+        console.error("Error saving post:", error);
+        res.status(500).json({ error: "Internal Server Error", error });
+      });
+  } catch (e) {
+    res.status(400).json({ message: "Can not fetch data." });
+  }  
+})
+
+// Route to handle removing a requested connection from a profile
+app.post("/remove-requested-connection/userid=:profileId/request-connectionid=:requestedConnectionId", async (req, res) => {
+  try {
+      const profileId = req.params.profileId;
+      const requestedConnectionId = req.params.requestedConnectionId;
+
+      // Find the profile by ID
+      const profile = await Profile.findById(profileId);
+
+      if (!profile) {
+          return res.status(404).json({ message: "Profile not found" });
+      }
+
+      // Check if the requested connection ID exists in the requestedConnections array
+      const index = profile.requestedConnections.indexOf(requestedConnectionId);
+
+      if (index === -1) {
+          return res.status(404).json({ data:false,message: "Requested connection not found in the profile" });
+      }
+
+      // Remove the requested connection ID from the requestedConnections array
+      profile.requestedConnections.splice(index, 1);
+
+      // Save the profile with the updated requestedConnections array
+      await profile.save();
+
+      res.status(200).json({ data:true,message: "Requested connection removed successfully" });
+  } catch (error) {
+      console.error("Error removing requested connection:", error);
+      res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+
+//This api is used for getting resquest connections of the profile.
+app.get("/getuser_resquestconnects/userid=:userid&pagenumber=:pagenumeber&count=:pagesize", async (req, res)=>{
+  try {
+    const userid = req.params.userid;
+    // Pagination parameters
+    const page = req.params.pagenumeber; // Current page number
+    const pageSize = req.params.pagesize; // Number of posts per page
+
+    // Calculate the number of documents to skip
+    const skip = (page - 1) * pageSize;
+    Profile.findById(userid)
+        .populate("requestedConnections")
+        .skip(skip)
+        .limit(pageSize)
+      .then((profile) => {
+          const count = profile.requestedConnections.length;
+          const pagesize = count > 10 ? parseInt(count / 10) : 1;
+          res.status(200).json({ pagenumber: pagesize, data: profile });
+      })
+      .catch((e) => {
+        console.error("Error saving post:", e);
+        res.status(500).json({ error: "Internal Server Error", e });
+      });
+  } catch (e) {
+    res.status(400).json({ message: "Can not fetch data." });
+  }  
+})
+
 //This api is user for get all post of the profile.
 app.get("/getuserposts/userid=:userid&pagenumber=:pagenumeber&count=:pagesize", async (req, res) => {
   try {
@@ -219,12 +308,13 @@ app.get("/getuserposts/userid=:userid&pagenumber=:pagenumeber&count=:pagesize", 
         .limit(pageSize)
       .then((post) => {
         Post.countDocuments({ author: userid }).then((count) => {
-          res.status(200).json({ count: count, data: post });
+          const pagesize = count > 10 ? parseInt(count / 10) : 1;
+          res.status(200).json({ pagenumber: pagesize, data: post });
         });
       })
       .catch((e) => {
-        console.error("Error saving post:", error);
-        res.status(500).json({ error: "Internal Server Error", error });
+        console.error("Error saving post:", e);
+        res.status(500).json({ error: "Internal Server Error", e });
       });
   } catch (e) {
     res.status(400).json({ message: "Can not fetch data." });
@@ -240,8 +330,8 @@ app.post("/requestconnections/userid=:userid", async (req, res) => {
     console.log("user id is ", userid);
     console.log("connection id is", connectionid);
     Profile.findOneAndUpdate(
-      { _id: userid, requestedConnections: { $ne: connectionid } }, // Check if connectionid doesn't exist
-      { $addToSet: { requestedConnections: connectionid } }, // Add connectionid if it doesn't exist
+      { _id: connectionid, requestedConnections: { $ne: userid } }, // Check if connectionid doesn't exist
+      { $addToSet: { requestedConnections: userid } }, // Add connectionid if it doesn't exist
       { new: true }
     )
       .then((profile) => {
@@ -274,8 +364,10 @@ app.post("/acceptconnections/userid=:userid", async (req, res) => {
     console.log("connection id is", connectionid);
     Profile.findOneAndUpdate(
       { _id: userid },
-      { $push: { connections: connectionid } },
-      { $pull: { requestedConnections: connectionid } },
+      { 
+        $addToSet: { connections: connectionid }, // Add the connectionid to the connections array
+        $pull: { requestedConnections: connectionid } // Remove the connectionid from the requestedConnections array
+      },
       { new: true }
     )
       .then((profile) => {
@@ -284,23 +376,30 @@ app.post("/acceptconnections/userid=:userid", async (req, res) => {
           .json({ message: "request accept successfuly", data: profile });
       })
       .catch((e) => {
-        console.error("Error saving post:", error);
-        res.status(500).json({ error: "Internal Server Error", error });
+        console.error("Error saving post:", e);
+        res.status(500).json({ error: "Internal Server Error", e });
       });
   } catch (e) {
     res.status(400).json({ message: "Can not fetch data." });
   }
 });
 
-app.get("/get-profile/userid=:userid", async (req, res) => {
+app.get("/get-profile/userid=:userid/checkconnection=:checkconnection", async (req, res) => {
   try {
     const userid = req.params.userid;
-    console.log(userid);
+    const check_connection = req.params.checkconnection;
+    console.log("checkconnection",check_connection);
+    console.log("userid",userid);
     if (userid.match(/^[0-9a-fA-F]{24}$/)) {
       // Yes, it's a valid ObjectId, proceed with `findById` call.
       Profile.findById(userid).populate("connections").populate('posts').populate('requestedConnections')
         .then((profile) => {
-          res.status(200).json({ data: profile });
+          if(userid==check_connection){
+            res.status(200).json({ message:"please verify data..." });
+          }
+          const isconnectionExists = profile.connections.includes(check_connection);
+          console.log(isconnectionExists)
+          res.status(200).json({ connection_exist:isconnectionExists,data: profile });
         })
         .catch((error) => {
           console.error("Error saving post:", error);

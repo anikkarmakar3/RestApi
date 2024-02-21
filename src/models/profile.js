@@ -27,7 +27,7 @@ const profile = new mongoose.Schema({
     requestedConnections: [{ type: Schema.Types.ObjectId, ref: 'Profile' }] // Reference to users who requested connection
 },
 {
-    timestamps:true
+    timestamps:Date.now
 })
 
 const Profile = new mongoose.model('Profile', profile);
