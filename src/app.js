@@ -136,6 +136,7 @@ app.get(
         .skip(skip)
         .limit(pageSize)
         .populate("author")
+        .sort({ createdAt: -1 })
         .then((post) => {
           Post.countDocuments({}).then((count) => {
             const pagesize = count > 10 ? parseInt(count / 10) : 1;
@@ -223,8 +224,8 @@ app.get("/getuser_acceptconnects/userid=:userid&pagenumber=:pagenumeber&count=:p
           res.status(200).json({ pagenumber: pagesize, data: profile });
       })
       .catch((e) => {
-        console.error("Error saving post:", error);
-        res.status(500).json({ error: "Internal Server Error", error });
+        console.error("Error saving post:", e);
+        res.status(500).json({ error: "Internal Server Error", e });
       });
   } catch (e) {
     res.status(400).json({ message: "Can not fetch data." });
@@ -306,6 +307,7 @@ app.get("/getuserposts/userid=:userid&pagenumber=:pagenumeber&count=:pagesize", 
     Post.find({ author: userid })
         .skip(skip)
         .limit(pageSize)
+        .sort({ createdAt: -1 })
       .then((post) => {
         Post.countDocuments({ author: userid }).then((count) => {
           const pagesize = count > 10 ? parseInt(count / 10) : 1;
@@ -351,7 +353,7 @@ app.post("/requestconnections/userid=:userid", async (req, res) => {
         res.status(500).json({ error: "Internal Server Error", e });
       });
   } catch (e) {
-    res.status(400).json({ message: "Can not fetch data." });
+    res.status(400).json({ message: "Can not fetch data.",e });
   }
 });
 
@@ -371,13 +373,24 @@ app.post("/acceptconnections/userid=:userid", async (req, res) => {
       { new: true }
     )
       .then((profile) => {
+        return Profile.findOneAndUpdate(
+          { _id: connectionid },
+          { 
+            $addToSet: { connections: userid } // Add the userid to the connections array of the connectionid user
+          },
+          { new: true }
+        );
+      })
+      .then(connectionUser => {
         res
           .status(200)
-          .json({ message: "request accept successfuly", data: profile });
+          .json({ message: "request accept successfuly" });
+        console.log("User profile updated:", user);
+        console.log("Connection user profile updated:", connectionUser);
+        // Send response or do other actions
       })
-      .catch((e) => {
-        console.error("Error saving post:", e);
-        res.status(500).json({ error: "Internal Server Error", e });
+      .catch(err => {
+        // Handle error
       });
   } catch (e) {
     res.status(400).json({ message: "Can not fetch data." });
@@ -396,10 +409,12 @@ app.get("/get-profile/userid=:userid/checkconnection=:checkconnection", async (r
         .then((profile) => {
           if(userid==check_connection){
             res.status(200).json({ message:"please verify data..." });
+            return
           }
-          const isconnectionExists = profile.connections.includes(check_connection);
-          console.log(isconnectionExists)
-          res.status(200).json({ connection_exist:isconnectionExists,data: profile });
+          const isConnectionExists = profile.connections.some(connection => connection.equals(check_connection));
+          const isInRequestConnectionExists = profile.requestedConnections.some(connection => connection.equals(check_connection));
+          console.log(isConnectionExists)
+          res.status(200).json({ connection_exist:isConnectionExists,request_connection_exist:isInRequestConnectionExists,data: profile });
         })
         .catch((error) => {
           console.error("Error saving post:", error);

@@ -7,7 +7,7 @@ const postSchema = new mongoose.Schema({
     author: { type: mongoose.Schema.Types.ObjectId, ref: 'Profile' }
 },
 {
-    timestamps:true
+    timestamps:Date.now
 })
 
 const Post = new mongoose.model('Post', postSchema);
