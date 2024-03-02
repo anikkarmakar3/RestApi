@@ -1,4 +1,5 @@
 const express = require("express");
+const AWS = require("aws-sdk");
 require("../src/db/conn");
 const Post = require("../src/models/posts");
 const Profile = require("../src/models/profile");
@@ -16,7 +17,22 @@ const io = require("socket.io")(server);
 let newotp = "";
 const cors = require("cors");
 
+// Initialize AWS SDK
+AWS.config.update({
+  accessKeyId: "AKIAU6GD2MAPUGPGD4OI",
+  secretAccessKey: "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",
+  region: "ap-south-1",
+});
+
+// const sns = new AWS.SNS();
+
 // Enable CORS for all routes
+
+// Set the AWS region
+// AWS.config.update({ region: 'ap-south-1' });
+
+// Create a new instance of the Amazon SNS service object
+const sns = new AWS.SNS();
 
 // Enable CORS with specific options
 app.use(
@@ -41,7 +57,16 @@ app.use(express.json());
 
 // Web Socket integration connection
 io.on("connection", (socket) => {
-  console.log("New user connected:", socket.id);
+  console.log("New user connected:", socket.handshake.auth.token);
+
+  let userId = socket.handshake.auth.token;
+
+  Profile.findByIdAndUpdate({ _id: userId }, { $set: { is_online: "1" } }).then(
+    () => {
+      console.log("profile data update complete", socket.handshake.auth.token);
+      socket.broadcast.emit("setUserOnline", { user_id: userId });
+    }
+  );
 
   socket.on("joinRoom", (roomId) => {
     socket.join(roomId); // Join specific chat room
@@ -52,23 +77,23 @@ io.on("connection", (socket) => {
     // io.to(message.chatRoom).emit("messageReceived", message);
     const { senderId, recipientId, content } = data;
     // console.log("dsafdsaf"+data)
-      // console.log(data.content)
-        // Create a new message instance
-        const newMessage = new Message({
-            senderId,
-            recipientId,
-            content
-        });
+    // console.log(data.content)
+    // Create a new message instance
+    const newMessage = new Message({
+      senderId,
+      recipientId,
+      content,
+    });
 
-        newMessage.save().then((message) => {
-          console.log(message);
-          
-        })
-        .catch((error) => {
-          console.error("Error saving post:", error);
-          
-        });
-      
+    newMessage
+      .save()
+      .then((message) => {
+        console.log(message);
+      })
+      .catch((error) => {
+        console.error("Error saving post:", error);
+      });
+
     console.log("=====>>>>>", data);
     io.emit("sendMessage", data);
   });
@@ -77,13 +102,25 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
+    Profile.findByIdAndUpdate(
+      { _id: userId },
+      { $set: { is_online: "0" } }
+    ).then(() => {
+      console.log("profile data update complete", socket.handshake.auth.token);
+      socket.broadcast.emit("setUserOffline", { user_id: userId });
+    });
   });
 
   // Handle fetching messages for a user
-  socket.on("fetchMessages", async (recipientId) => {
+  socket.on("fetchMessages", async (data) => {
     try {
-      const messages = await YourMessageModel.find({ recipientId });
-      socket.emit("messages", messages);
+      const messages = await Message.find({
+        $or: [
+          { sender: data.user_id, recipientId: data.recipient_id },
+          { sender: data.recipient_id, recipientId: data.user_id },
+        ],
+      });
+      socket.emit("messages", { oldchat: messages });
     } catch (error) {
       console.error("Error fetching messages:", error);
       // You can emit an error event or handle the error in another way
@@ -166,6 +203,25 @@ const storage = multer.diskStorage({
 // Create an instance of Multer for handling file uploads
 const upload = multer({ storage: storage });
 
+// Your API route handler
+app.get("/getMessagesWithRecipientProfiles", async (req, res) => {
+  try {
+    // Aggregate pipeline to get distinct recipientIds and populate recipient details
+    // Step 1: Fetch distinct recipientIds
+    const recipientIds = await Message.distinct("recipientId", {
+      sender: req.userId,
+    });
+
+    // Step 2: Populate profile details for each recipientId
+    const recipientDetails = await Profile.find({ _id: { $in: recipientIds } });
+
+    res.json(recipientDetails);
+  } catch (error) {
+    console.error("Error fetching messages with recipient profiles:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 //This api is used for upload image of the profile.
 app.post("/upload/userid=:userid", upload.single("photo"), async (req, res) => {
   try {
@@ -180,20 +236,40 @@ app.post("/upload/userid=:userid", upload.single("photo"), async (req, res) => {
     photo
       .save()
       .then((photo) => {
-        console.log(photo.content);
-        // Update the user's posts array with the newly created post
-        Profile.findByIdAndUpdate(photo.profile, {
-          $push: { profilephoto: photo._id },
-        }).then((profile) => {
-          console.log(profile.posts);
-        });
-        // Construct the response object
-        const response = {
-          message: "Photo inserted inserted successfully",
-          data: photo,
-        };
-        // Send the response back to the client
-        res.status(200).json(response);
+        // console.log(photo.content);
+        // // Update the user's posts array with the newly created post
+        // Profile.findByIdAndUpdate(photo.profile, {
+        //   $set: { profilephoto: [] }, // Clear the profilephoto array
+        //   $push: { profilephoto: photo._id }, // Push the new photo._id
+        // }).then((profile) => {
+        //   console.log(profile.posts);
+        // });
+        // // Construct the response object
+        // const response = {
+        //   message: "Photo inserted inserted successfully",
+        //   data: photo,
+        // };
+        // // Send the response back to the client
+        // res.status(200).json(response);
+        Profile.findById(photo.profile)
+          .then((profile) => {
+            // Clear the profilephoto array
+            profile.profilephoto = [];
+
+            // Push the new photo._id
+            profile.profilephoto.push(photo._id);
+
+            // Save the updated profile document
+            return profile.save();
+          })
+          .then((updatedProfile) => {
+            // Log the updated profile's posts
+            console.log(updatedProfile.posts);
+          })
+          .catch((error) => {
+            // Handle errors
+            console.error(error);
+          });
       })
       .catch((error) => {
         console.error("Error saving post:", error);
@@ -205,36 +281,42 @@ app.post("/upload/userid=:userid", upload.single("photo"), async (req, res) => {
   }
 });
 
-app.get("/getuser_acceptconnects/userid=:userid&pagenumber=:pagenumeber&count=:pagesize", async (req, res)=>{
-  try {
-    const userid = req.params.userid;
-    // Pagination parameters
-    const page = req.params.pagenumeber; // Current page number
-    const pageSize = req.params.pagesize; // Number of posts per page
+//This api is used for get connection of profile.
+app.get(
+  "/getuser_acceptconnects/userid=:userid&pagenumber=:pagenumeber&count=:pagesize",
+  async (req, res) => {
+    try {
+      const userid = req.params.userid;
+      // Pagination parameters
+      const page = req.params.pagenumeber; // Current page number
+      const pageSize = req.params.pagesize; // Number of posts per page
 
-    // Calculate the number of documents to skip
-    const skip = (page - 1) * pageSize;
-    Profile.findById(userid)
+      // Calculate the number of documents to skip
+      const skip = (page - 1) * pageSize;
+      Profile.findById(userid)
         .populate("connections")
         .skip(skip)
         .limit(pageSize)
-      .then((profile) => {
+        .then((profile) => {
           const count = profile.connections.length;
           const pagesize = count > 10 ? parseInt(count / 10) : 1;
           res.status(200).json({ pagenumber: pagesize, data: profile });
-      })
-      .catch((e) => {
-        console.error("Error saving post:", e);
-        res.status(500).json({ error: "Internal Server Error", e });
-      });
-  } catch (e) {
-    res.status(400).json({ message: "Can not fetch data." });
-  }  
-})
+        })
+        .catch((e) => {
+          console.error("Error saving post:", e);
+          res.status(500).json({ error: "Internal Server Error", e });
+        });
+    } catch (e) {
+      res.status(400).json({ message: "Can not fetch data." });
+    }
+  }
+);
 
 // Route to handle removing a requested connection from a profile
-app.post("/remove-requested-connection/userid=:profileId/request-connectionid=:requestedConnectionId", async (req, res) => {
-  try {
+app.post(
+  "/remove-requested-connection/userid=:profileId/request-connectionid=:requestedConnectionId",
+  async (req, res) => {
+    try {
       const profileId = req.params.profileId;
       const requestedConnectionId = req.params.requestedConnectionId;
 
@@ -242,14 +324,17 @@ app.post("/remove-requested-connection/userid=:profileId/request-connectionid=:r
       const profile = await Profile.findById(profileId);
 
       if (!profile) {
-          return res.status(404).json({ message: "Profile not found" });
+        return res.status(404).json({ message: "Profile not found" });
       }
 
       // Check if the requested connection ID exists in the requestedConnections array
       const index = profile.requestedConnections.indexOf(requestedConnectionId);
 
       if (index === -1) {
-          return res.status(404).json({ data:false,message: "Requested connection not found in the profile" });
+        return res.status(404).json({
+          data: false,
+          message: "Requested connection not found in the profile",
+        });
       }
 
       // Remove the requested connection ID from the requestedConnections array
@@ -258,70 +343,79 @@ app.post("/remove-requested-connection/userid=:profileId/request-connectionid=:r
       // Save the profile with the updated requestedConnections array
       await profile.save();
 
-      res.status(200).json({ data:true,message: "Requested connection removed successfully" });
-  } catch (error) {
+      res.status(200).json({
+        data: true,
+        message: "Requested connection removed successfully",
+      });
+    } catch (error) {
       console.error("Error removing requested connection:", error);
       res.status(500).json({ message: "Internal server error" });
+    }
   }
-});
-
+);
 
 //This api is used for getting resquest connections of the profile.
-app.get("/getuser_resquestconnects/userid=:userid&pagenumber=:pagenumeber&count=:pagesize", async (req, res)=>{
-  try {
-    const userid = req.params.userid;
-    // Pagination parameters
-    const page = req.params.pagenumeber; // Current page number
-    const pageSize = req.params.pagesize; // Number of posts per page
+app.get(
+  "/getuser_resquestconnects/userid=:userid&pagenumber=:pagenumeber&count=:pagesize",
+  async (req, res) => {
+    try {
+      const userid = req.params.userid;
+      // Pagination parameters
+      const page = req.params.pagenumeber; // Current page number
+      const pageSize = req.params.pagesize; // Number of posts per page
 
-    // Calculate the number of documents to skip
-    const skip = (page - 1) * pageSize;
-    Profile.findById(userid)
+      // Calculate the number of documents to skip
+      const skip = (page - 1) * pageSize;
+      Profile.findById(userid)
         .populate("requestedConnections")
         .skip(skip)
         .limit(pageSize)
-      .then((profile) => {
+        .then((profile) => {
           const count = profile.requestedConnections.length;
           const pagesize = count > 10 ? parseInt(count / 10) : 1;
           res.status(200).json({ pagenumber: pagesize, data: profile });
-      })
-      .catch((e) => {
-        console.error("Error saving post:", e);
-        res.status(500).json({ error: "Internal Server Error", e });
-      });
-  } catch (e) {
-    res.status(400).json({ message: "Can not fetch data." });
-  }  
-})
+        })
+        .catch((e) => {
+          console.error("Error saving post:", e);
+          res.status(500).json({ error: "Internal Server Error", e });
+        });
+    } catch (e) {
+      res.status(400).json({ message: "Can not fetch data." });
+    }
+  }
+);
 
 //This api is user for get all post of the profile.
-app.get("/getuserposts/userid=:userid&pagenumber=:pagenumeber&count=:pagesize", async (req, res) => {
-  try {
-    const userid = req.params.userid;
-    // Pagination parameters
-    const page = req.params.pagenumeber; // Current page number
-    const pageSize = req.params.pagesize; // Number of posts per page
+app.get(
+  "/getuserposts/userid=:userid&pagenumber=:pagenumeber&count=:pagesize",
+  async (req, res) => {
+    try {
+      const userid = req.params.userid;
+      // Pagination parameters
+      const page = req.params.pagenumeber; // Current page number
+      const pageSize = req.params.pagesize; // Number of posts per page
 
-    // Calculate the number of documents to skip
-    const skip = (page - 1) * pageSize;
-    Post.find({ author: userid })
+      // Calculate the number of documents to skip
+      const skip = (page - 1) * pageSize;
+      Post.find({ author: userid })
         .skip(skip)
         .limit(pageSize)
         .sort({ createdAt: -1 })
-      .then((post) => {
-        Post.countDocuments({ author: userid }).then((count) => {
-          const pagesize = count > 10 ? parseInt(count / 10) : 1;
-          res.status(200).json({ pagenumber: pagesize, data: post });
+        .then((post) => {
+          Post.countDocuments({ author: userid }).then((count) => {
+            const pagesize = count > 10 ? parseInt(count / 10) : 1;
+            res.status(200).json({ pagenumber: pagesize, data: post });
+          });
+        })
+        .catch((e) => {
+          console.error("Error saving post:", e);
+          res.status(500).json({ error: "Internal Server Error", e });
         });
-      })
-      .catch((e) => {
-        console.error("Error saving post:", e);
-        res.status(500).json({ error: "Internal Server Error", e });
-      });
-  } catch (e) {
-    res.status(400).json({ message: "Can not fetch data." });
+    } catch (e) {
+      res.status(400).json({ message: "Can not fetch data." });
+    }
   }
-});
+);
 
 //This api is user for send request connections.
 app.post("/requestconnections/userid=:userid", async (req, res) => {
@@ -353,7 +447,7 @@ app.post("/requestconnections/userid=:userid", async (req, res) => {
         res.status(500).json({ error: "Internal Server Error", e });
       });
   } catch (e) {
-    res.status(400).json({ message: "Can not fetch data.",e });
+    res.status(400).json({ message: "Can not fetch data.", e });
   }
 });
 
@@ -366,30 +460,28 @@ app.post("/acceptconnections/userid=:userid", async (req, res) => {
     console.log("connection id is", connectionid);
     Profile.findOneAndUpdate(
       { _id: userid },
-      { 
+      {
         $addToSet: { connections: connectionid }, // Add the connectionid to the connections array
-        $pull: { requestedConnections: connectionid } // Remove the connectionid from the requestedConnections array
+        $pull: { requestedConnections: connectionid }, // Remove the connectionid from the requestedConnections array
       },
       { new: true }
     )
       .then((profile) => {
         return Profile.findOneAndUpdate(
           { _id: connectionid },
-          { 
-            $addToSet: { connections: userid } // Add the userid to the connections array of the connectionid user
+          {
+            $addToSet: { connections: userid }, // Add the userid to the connections array of the connectionid user
           },
           { new: true }
         );
       })
-      .then(connectionUser => {
-        res
-          .status(200)
-          .json({ message: "request accept successfuly" });
+      .then((connectionUser) => {
+        res.status(200).json({ message: "request accept successfuly" });
         console.log("User profile updated:", user);
         console.log("Connection user profile updated:", connectionUser);
         // Send response or do other actions
       })
-      .catch(err => {
+      .catch((err) => {
         // Handle error
       });
   } catch (e) {
@@ -397,36 +489,52 @@ app.post("/acceptconnections/userid=:userid", async (req, res) => {
   }
 });
 
-app.get("/get-profile/userid=:userid/checkconnection=:checkconnection", async (req, res) => {
-  try {
-    const userid = req.params.userid;
-    const check_connection = req.params.checkconnection;
-    console.log("checkconnection",check_connection);
-    console.log("userid",userid);
-    if (userid.match(/^[0-9a-fA-F]{24}$/)) {
-      // Yes, it's a valid ObjectId, proceed with `findById` call.
-      Profile.findById(userid).populate("connections").populate('posts').populate('requestedConnections')
-        .then((profile) => {
-          if(userid==check_connection){
-            res.status(200).json({ message:"please verify data..." });
-            return
-          }
-          const isConnectionExists = profile.connections.some(connection => connection.equals(check_connection));
-          const isInRequestConnectionExists = profile.requestedConnections.some(connection => connection.equals(check_connection));
-          console.log(isConnectionExists)
-          res.status(200).json({ connection_exist:isConnectionExists,request_connection_exist:isInRequestConnectionExists,data: profile });
-        })
-        .catch((error) => {
-          console.error("Error saving post:", error);
-          res.status(500).json({ error: "Internal Server Error", error });
-        });
-    } else {
-      res.status(400).json({ message: "id is not valid." });
+app.get(
+  "/get-profile/userid=:userid/checkconnection=:checkconnection",
+  async (req, res) => {
+    try {
+      const userid = req.params.userid;
+      const check_connection = req.params.checkconnection;
+      console.log("checkconnection", check_connection);
+      console.log("userid", userid);
+      if (userid.match(/^[0-9a-fA-F]{24}$/)) {
+        // Yes, it's a valid ObjectId, proceed with `findById` call.
+        Profile.findById(userid)
+          .populate("profilephoto")
+          .populate("connections")
+          .populate("posts")
+          .populate("requestedConnections")
+          .then((profile) => {
+            if (userid == check_connection) {
+              res.status(200).json({ message: "please verify data..." });
+              return;
+            }
+            const isConnectionExists = profile.connections.some((connection) =>
+              connection.equals(check_connection)
+            );
+            const isInRequestConnectionExists =
+              profile.requestedConnections.some((connection) =>
+                connection.equals(check_connection)
+              );
+            console.log(isConnectionExists);
+            res.status(200).json({
+              connection_exist: isConnectionExists,
+              request_connection_exist: isInRequestConnectionExists,
+              data: profile,
+            });
+          })
+          .catch((error) => {
+            console.error("Error saving post:", error);
+            res.status(500).json({ error: "Internal Server Error", error });
+          });
+      } else {
+        res.status(400).json({ message: "id is not valid." });
+      }
+    } catch (e) {
+      res.status(400).json({ message: "Can not fetch data." });
     }
-  } catch (e) {
-    res.status(400).json({ message: "Can not fetch data." });
   }
-});
+);
 
 //This api is used for edit particular post.
 app.patch("/editpost/postid=:postid", async (req, res) => {
@@ -656,21 +764,23 @@ app.post("/validate-otp", (req, res) => {
 });
 
 //This api is user for serach
-app.get('/serachposts', async (req, res) => {
+app.get("/serachposts", async (req, res) => {
   const { searchText } = req.query;
 
   try {
-      // Split the search text into individual words
-      const searchWords = searchText.split(' ');
+    // Split the search text into individual words
+    const searchWords = searchText.split(" ");
 
-      // Construct an array of regular expressions to match any of the search words
-      const regexArray = searchWords.map(word => new RegExp(word, 'i'));
+    // Construct an array of regular expressions to match any of the search words
+    const regexArray = searchWords.map((word) => new RegExp(word, "i"));
 
-      // Query the database for posts containing any of the search words in their content
-      const posts = await Post.find({ content: { $in: regexArray } }).populate('author');
+    // Query the database for posts containing any of the search words in their content
+    const posts = await Post.find({ content: { $in: regexArray } }).populate(
+      "author"
+    );
 
-      res.json(posts);
+    res.json(posts);
   } catch (err) {
-      res.status(500).json({ message: err.message });
+    res.status(500).json({ message: err.message });
   }
 });
