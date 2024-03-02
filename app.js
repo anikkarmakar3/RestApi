@@ -7,6 +7,7 @@ const Profile = require("./src/models/profile");
 const Message = require("./src/models/message");
 const Chatroom = require("./src/models/chatroom");
 const Photo = require("./src/models/profilephoto");
+const path = require('path');
 const multer = require("multer");
 const bodyParser = require("body-parser");
 const router = express.Router();
@@ -16,7 +17,25 @@ const port = process.env.PORT || 3000;
 const server = require("http").createServer(app);
 const io = require("socket.io")(server);
 let newotp = "";
+let baseURL = ""
 const cors = require("cors");
+
+
+// app.use((req, res, next) => {
+//   // Construct the base URL
+//   req.baseURL = `${req.protocol}://${req.get('host')}`;
+//   next();
+// });
+
+// // Now you can access the base URL using req.baseURL in your routes
+
+// // Example route
+// app.get('/test', (req, res) => {
+//   // Use req.baseURL to get the base URL
+//   baseURL = req.baseURL;
+//   console.log("base url is",baseURL)
+//   res.send(`Base URL: ${baseURL}`);
+// });
 
 // Initialize AWS SDK
 AWS.config.update({
@@ -222,7 +241,8 @@ app.get("/getMessagesWithRecipientProfiles", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
+// Serve uploaded files statically
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 //This api is used for upload image of the profile.
 app.post("/upload/userid=:userid", upload.single("photo"), async (req, res) => {
   try {
@@ -233,44 +253,43 @@ app.post("/upload/userid=:userid", upload.single("photo"), async (req, res) => {
       imageUrl: file.path,
       profile: profileId,
     });
-    console.log(photo);
     photo
       .save()
       .then((photo) => {
-        // console.log(photo.content);
-        // // Update the user's posts array with the newly created post
-        // Profile.findByIdAndUpdate(photo.profile, {
-        //   $set: { profilephoto: [] }, // Clear the profilephoto array
-        //   $push: { profilephoto: photo._id }, // Push the new photo._id
-        // }).then((profile) => {
-        //   console.log(profile.posts);
-        // });
-        // // Construct the response object
-        // const response = {
-        //   message: "Photo inserted inserted successfully",
-        //   data: photo,
-        // };
-        // // Send the response back to the client
-        // res.status(200).json(response);
-        Profile.findById(photo.profile)
-          .then((profile) => {
-            // Clear the profilephoto array
-            profile.profilephoto = [];
+        console.log(photo.content);
+        // Update the user's posts array with the newly created post
+        Profile.findByIdAndUpdate(photo.profile, {
+          // $set: { profilephoto: [] }, // Clear the profilephoto array
+          $push: { profilephoto: photo._id }, // Push the new photo._id
+        }).then((profile) => {
+          const response = {
+            message: "Photo inserted inserted successfully",
+            data: photo,
+          };
+          // Send the response back to the client
+          res.status(200).json(response);
+        });
+        // Construct the response object
+        
+        // Profile.findById(photo.profile)
+        //   .then((profile) => {
+        //     // Clear the profilephoto array
+        //     profile.profilephoto = [];
 
-            // Push the new photo._id
-            profile.profilephoto.push(photo._id);
+        //     // Push the new photo._id
+        //     profile.profilephoto.push(photo._id);
 
-            // Save the updated profile document
-            return profile.save();
-          })
-          .then((updatedProfile) => {
-            // Log the updated profile's posts
-            console.log(updatedProfile.posts);
-          })
-          .catch((error) => {
-            // Handle errors
-            console.error(error);
-          });
+        //     // Save the updated profile document
+        //     return profile.save();
+        //   })
+          // .then((updatedProfile) => {
+          //   // Log the updated profile's posts
+          //   console.log(updatedProfile.posts);
+          // })
+          // .catch((error) => {
+          //   // Handle errors
+          //   console.error(error);
+          // });
       })
       .catch((error) => {
         console.error("Error saving post:", error);
