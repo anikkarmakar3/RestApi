@@ -1,11 +1,12 @@
+require('dotenv').config()
 const express = require("express");
 const AWS = require("aws-sdk");
-require("../src/db/conn");
-const Post = require("../src/models/posts");
-const Profile = require("../src/models/profile");
-const Message = require("../src/models/message");
-const Chatroom = require("../src/models/chatroom");
-const Photo = require("../src/models/profilephoto");
+require("./conn");
+const Post = require("./src/models/posts");
+const Profile = require("./src/models/profile");
+const Message = require("./src/models/message");
+const Chatroom = require("./src/models/chatroom");
+const Photo = require("./src/models/profilephoto");
 const multer = require("multer");
 const bodyParser = require("body-parser");
 const router = express.Router();
@@ -48,7 +49,7 @@ app.use(cors());
 //SDFYRNCYCTJX8YE1G7HDUSZM  This is the recovery
 // Twilio credentials
 const accountSid = "ACe21dc0ed41d7f59f855f1d6e6b227904";
-const authToken = "5b9ac5802fbd9cbab0e25bfb06ef38c8";
+const authToken = "3e3c27864cd6f219444a47448a16df07";
 const twilioPhoneNumber = "+18644775435";
 
 const client = twilio(accountSid, authToken);
