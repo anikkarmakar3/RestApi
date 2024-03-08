@@ -108,6 +108,7 @@ io.on("connection", (socket) => {
     newMessage
       .save()
       .then((message) => {
+        console.log("message save successfully")
         console.log(message);
       })
       .catch((error) => {
@@ -134,12 +135,14 @@ io.on("connection", (socket) => {
   // Handle fetching messages for a user
   socket.on("fetchMessages", async (data) => {
     try {
+      console.log(data)
       const messages = await Message.find({
         $or: [
-          { sender: data.user_id, recipientId: data.recipient_id },
-          { sender: data.recipient_id, recipientId: data.user_id },
+          { senderId: data.user_id, recipientId: data.recipient_id },
+          { senderId: data.recipient_id, recipientId: data.user_id },
         ],
-      });
+      }).sort({ timestamp: -1 });
+      console.log(messages)
       socket.emit("messages", { oldchat: messages });
     } catch (error) {
       console.error("Error fetching messages:", error);
@@ -192,7 +195,13 @@ app.get(
       Post.find({})
         .skip(skip)
         .limit(pageSize)
-        .populate("author")
+        .populate({
+          path: 'author',
+          populate: {
+            path: 'profilephoto', // Assuming the field name is profilePhoto in your author schema
+            model: 'ProfilePhoto' // Assuming the model name is ProfilePhoto
+          }
+        })
         .sort({ createdAt: -1 })
         .then((post) => {
           Post.countDocuments({}).then((count) => {
@@ -202,8 +211,8 @@ app.get(
           });
         })
         .catch((e) => {
-          console.error("Error saving post:", error);
-          res.status(500).json({ error: "Internal Server Error", error });
+          console.error("Error saving post:", e);
+          res.status(500).json({ error: "Internal Server Error", e });
         });
     } catch (error) {
       res.status(400).json({ message: "Can not fetch data." });
@@ -420,6 +429,13 @@ app.get(
       Post.find({ author: userid })
         .skip(skip)
         .limit(pageSize)
+        .populate({
+          path: 'author',
+          populate: {
+            path: 'profilephoto', // Assuming the field name is profilePhoto in your author schema
+            model: 'ProfilePhoto' // Assuming the model name is ProfilePhoto
+          }
+        })
         .sort({ createdAt: -1 })
         .then((post) => {
           Post.countDocuments({ author: userid }).then((count) => {
